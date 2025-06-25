@@ -3,12 +3,12 @@
 from flask import request, session, jsonify
 from flask_restful import Resource
 
-from config import app, db, api, bcrypt
+from config import app, db, api
 from models import User
 
 class ClearSession(Resource):
     def delete(self):
-        session['user_id'] = None
+        session.pop('user_id', None)
         return {}, 204
 
 class Signup(Resource):
@@ -16,23 +16,24 @@ class Signup(Resource):
         json = request.get_json()
         username = json.get('username')
         password = json.get('password')
-        password_confirmation = json.get('password_confirmation')
+        password_confirmation = json.get('password_confirmation', password)
+
+        if not username or not password:
+            return {'error': 'Username and password required'}, 400
 
         if password != password_confirmation:
             return {'error': 'Passwords do not match'}, 422
 
-        # Check if username already exists
         if User.query.filter_by(username=username).first():
             return {'error': 'Username already taken'}, 422
 
-        hashed_password = bcrypt.generate_password_hash(password).decode('utf-8')
+        user = User(username=username)
+        user.password_hash = password  # Uses setter
 
-        user = User(username=username, _password_hash=hashed_password)
         db.session.add(user)
         db.session.commit()
 
         session['user_id'] = user.id
-
         return user.to_dict(), 201
 
 class CheckSession(Resource):
@@ -52,7 +53,7 @@ class Login(Resource):
 
         user = User.query.filter_by(username=username).first()
 
-        if user and bcrypt.check_password_hash(user._password_hash, password):
+        if user and user.authenticate(password):
             session['user_id'] = user.id
             return user.to_dict(), 200
 
@@ -60,7 +61,7 @@ class Login(Resource):
 
 class Logout(Resource):
     def delete(self):
-        session['user_id'] = None
+        session.pop('user_id', None)
         return {}, 204
 
 # Routes
